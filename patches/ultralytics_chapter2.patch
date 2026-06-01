@@ -1,0 +1,360 @@
+diff --git a/ultralytics/cfg/default.yaml b/ultralytics/cfg/default.yaml
+index ede10611d..69110fd24 100644
+--- a/ultralytics/cfg/default.yaml
++++ b/ultralytics/cfg/default.yaml
+@@ -101,6 +101,8 @@ warmup_bias_lr: 0.1 # (float) bias learning rate during warmup
+ box: 7.5 # (float) box loss gain
+ cls: 0.5 # (float) classification loss gain
+ dfl: 1.5 # (float) distribution focal loss gain
++bbox_loss: ciou # (str) box regression loss: ciou, eiou, or focal_eiou
++focal_eiou_gamma: 2.0 # (float) focal weighting exponent used when bbox_loss=focal_eiou
+ pose: 12.0 # (float) pose loss gain (pose tasks)
+ kobj: 1.0 # (float) keypoint objectness loss gain (pose tasks)
+ rle: 1.0 # (float) rle loss gain (pose tasks)
+diff --git a/ultralytics/nn/modules/__init__.py b/ultralytics/nn/modules/__init__.py
+index d0e1340e1..15067910a 100644
+--- a/ultralytics/nn/modules/__init__.py
++++ b/ultralytics/nn/modules/__init__.py
+@@ -25,7 +25,10 @@ from .block import (
+     C3TR,
+     CIB,
+     DFL,
++    DySample,
+     ELAN1,
++    EMA,
++    ECA,
+     PSA,
+     SPP,
+     SPPELAN,
+@@ -116,7 +119,10 @@ __all__ = (
+     "CBAM",
+     "CIB",
+     "DFL",
++    "DySample",
+     "ELAN1",
++    "EMA",
++    "ECA",
+     "MLP",
+     "OBB",
+     "OBB26",
+diff --git a/ultralytics/nn/modules/block.py b/ultralytics/nn/modules/block.py
+index d6f66644b..d0f41d258 100644
+--- a/ultralytics/nn/modules/block.py
++++ b/ultralytics/nn/modules/block.py
+@@ -21,6 +21,8 @@ __all__ = (
+     "CIB",
+     "DFL",
+     "ELAN1",
++    "EMA",
++    "ECA",
+     "PSA",
+     "SPP",
+     "SPPELAN",
+@@ -41,6 +43,7 @@ __all__ = (
+     "CBFuse",
+     "CBLinear",
+     "ContrastiveHead",
++    "DySample",
+     "GhostBottleneck",
+     "HGBlock",
+     "HGStem",
+@@ -55,6 +58,154 @@ __all__ = (
+ )
+
+
++class EMA(nn.Module):
++    """Efficient multi-scale attention for feature recalibration."""
++
++    def __init__(self, channels: int, factor: int = 32):
++        """Initialize EMA with grouped spatial and channel interactions."""
++        super().__init__()
++        if channels % factor:
++            raise ValueError(f"channels ({channels}) must be divisible by factor ({factor})")
++        self.groups = factor
++        channels_per_group = channels // factor
++        self.softmax = nn.Softmax(dim=-1)
++        self.agp = nn.AdaptiveAvgPool2d((1, 1))
++        self.pool_h = nn.AdaptiveAvgPool2d((None, 1))
++        self.pool_w = nn.AdaptiveAvgPool2d((1, None))
++        self.gn = nn.GroupNorm(channels_per_group, channels_per_group)
++        self.conv1x1 = nn.Conv2d(channels_per_group, channels_per_group, 1, bias=True)
++        self.conv3x3 = nn.Conv2d(channels_per_group, channels_per_group, 3, padding=1, bias=True)
++
++    def forward(self, x: torch.Tensor) -> torch.Tensor:
++        """Apply efficient multi-scale attention."""
++        batch, channels, height, width = x.shape
++        groups = self.groups
++        channels_per_group = channels // groups
++        group_x = x.reshape(batch * groups, channels_per_group, height, width)
++        x_h = self.pool_h(group_x)
++        x_w = self.pool_w(group_x).permute(0, 1, 3, 2)
++        hw = self.conv1x1(torch.cat([x_h, x_w], dim=2))
++        x_h, x_w = torch.split(hw, [height, width], dim=2)
++        x1 = self.gn(group_x * x_h.sigmoid() * x_w.permute(0, 1, 3, 2).sigmoid())
++        x2 = self.conv3x3(group_x)
++        x11 = self.softmax(self.agp(x1).reshape(batch * groups, 1, channels_per_group))
++        x12 = x2.reshape(batch * groups, channels_per_group, -1)
++        x21 = self.softmax(self.agp(x2).reshape(batch * groups, 1, channels_per_group))
++        x22 = x1.reshape(batch * groups, channels_per_group, -1)
++        weights = (torch.matmul(x11, x12) + torch.matmul(x21, x22)).reshape(batch * groups, 1, height, width)
++        return (group_x * weights.sigmoid()).reshape(batch, channels, height, width)
++
++
++class ECA(nn.Module):
++    """Efficient channel attention."""
++
++    def __init__(self, channels: int, kernel_size: int = 3):
++        """Initialize ECA with a one-dimensional channel convolution."""
++        super().__init__()
++        self.avg_pool = nn.AdaptiveAvgPool2d(1)
++        self.conv = nn.Conv1d(1, 1, kernel_size=kernel_size, padding=(kernel_size - 1) // 2, bias=False)
++        self.sigmoid = nn.Sigmoid()
++
++    def forward(self, x: torch.Tensor) -> torch.Tensor:
++        """Apply efficient channel attention."""
++        y = self.avg_pool(x).squeeze(-1).transpose(-1, -2)
++        y = self.conv(y).transpose(-1, -2).unsqueeze(-1)
++        return x * self.sigmoid(y)
++
++
++def normal_init(module: nn.Module, mean: float = 0.0, std: float = 1.0, bias: float = 0.0) -> None:
++    """Initialize module weights from a normal distribution."""
++    if hasattr(module, "weight") and module.weight is not None:
++        nn.init.normal_(module.weight, mean, std)
++    if hasattr(module, "bias") and module.bias is not None:
++        nn.init.constant_(module.bias, bias)
++
++
++def constant_init(module: nn.Module, value: float, bias: float = 0.0) -> None:
++    """Initialize module weights to a constant value."""
++    if hasattr(module, "weight") and module.weight is not None:
++        nn.init.constant_(module.weight, value)
++    if hasattr(module, "bias") and module.bias is not None:
++        nn.init.constant_(module.bias, bias)
++
++
++class DySample(nn.Module):
++    """Dynamic upsampling by learned sampling offsets."""
++
++    def __init__(self, in_channels: int, scale: int = 2, style: str = "lp", groups: int = 4, dyscope: bool = False):
++        """Initialize DySample."""
++        super().__init__()
++        if style not in {"lp", "pl"}:
++            raise ValueError(f"unsupported DySample style: {style}")
++        if style == "pl" and (in_channels < scale**2 or in_channels % scale**2):
++            raise ValueError("pl style requires channels divisible by scale squared")
++        if in_channels < groups or in_channels % groups:
++            raise ValueError("input channels must be divisible by groups")
++        self.scale = scale
++        self.style = style
++        self.groups = groups
++        offset_channels = 2 * groups if style == "pl" else 2 * groups * scale**2
++        offset_in_channels = in_channels // scale**2 if style == "pl" else in_channels
++        self.offset = nn.Conv2d(offset_in_channels, offset_channels, 1)
++        normal_init(self.offset, std=0.001)
++        if dyscope:
++            self.scope = nn.Conv2d(offset_in_channels, offset_channels, 1, bias=False)
++            constant_init(self.scope, value=0.0)
++        self.register_buffer("init_pos", self._init_pos())
++
++    def _init_pos(self) -> torch.Tensor:
++        """Create the regular initial sampling grid."""
++        h = torch.arange((-self.scale + 1) / 2, (self.scale - 1) / 2 + 1) / self.scale
++        return torch.stack(torch.meshgrid(h, h, indexing="ij")).transpose(1, 2).repeat(1, self.groups, 1).reshape(1, -1, 1, 1)
++
++    def sample(self, x: torch.Tensor, offset: torch.Tensor) -> torch.Tensor:
++        """Sample the input feature map at dynamically predicted offsets."""
++        batch, _, height, width = offset.shape
++        offset = offset.view(batch, 2, -1, height, width)
++        coords_h = torch.arange(height, device=x.device, dtype=x.dtype) + 0.5
++        coords_w = torch.arange(width, device=x.device, dtype=x.dtype) + 0.5
++        coords = torch.stack(torch.meshgrid(coords_w, coords_h, indexing="ij")).transpose(1, 2).unsqueeze(1).unsqueeze(0)
++        normalizer = torch.tensor([width, height], dtype=x.dtype, device=x.device).view(1, 2, 1, 1, 1)
++        coords = 2 * (coords + offset) / normalizer - 1
++        coords = (
++            F.pixel_shuffle(coords.view(batch, -1, height, width), self.scale)
++            .view(batch, 2, -1, self.scale * height, self.scale * width)
++            .permute(0, 2, 3, 4, 1)
++            .contiguous()
++            .flatten(0, 1)
++        )
++        return F.grid_sample(
++            x.reshape(batch * self.groups, -1, height, width),
++            coords,
++            mode="bilinear",
++            align_corners=False,
++            padding_mode="border",
++        ).view(batch, -1, self.scale * height, self.scale * width)
++
++    def forward_lp(self, x: torch.Tensor) -> torch.Tensor:
++        """Upsample using offsets predicted before pixel shuffling."""
++        offset = (
++            self.offset(x) * self.scope(x).sigmoid() * 0.5 + self.init_pos
++            if hasattr(self, "scope")
++            else self.offset(x) * 0.25 + self.init_pos
++        )
++        return self.sample(x, offset)
++
++    def forward_pl(self, x: torch.Tensor) -> torch.Tensor:
++        """Upsample using offsets predicted after pixel shuffling."""
++        x_ = F.pixel_shuffle(x, self.scale)
++        offset = (
++            F.pixel_unshuffle(self.offset(x_) * self.scope(x_).sigmoid(), self.scale) * 0.5 + self.init_pos
++            if hasattr(self, "scope")
++            else F.pixel_unshuffle(self.offset(x_), self.scale) * 0.25 + self.init_pos
++        )
++        return self.sample(x, offset)
++
++    def forward(self, x: torch.Tensor) -> torch.Tensor:
++        """Apply dynamic upsampling."""
++        return self.forward_pl(x) if self.style == "pl" else self.forward_lp(x)
++
++
+ class DFL(nn.Module):
+     """Integral module of Distribution Focal Loss (DFL).
+
+diff --git a/ultralytics/nn/tasks.py b/ultralytics/nn/tasks.py
+index 011410ee3..f1c88571d 100644
+--- a/ultralytics/nn/tasks.py
++++ b/ultralytics/nn/tasks.py
+@@ -37,16 +37,21 @@ from ultralytics.nn.modules import (
+     C3Ghost,
+     C3k2,
+     C3x,
++    CBAM,
+     CBFuse,
+     CBLinear,
++    ChannelAttention,
+     Classify,
+     Concat,
+     Conv,
+     Conv2,
+     ConvTranspose,
+     Detect,
++    DySample,
+     DWConv,
+     DWConvTranspose2d,
++    ECA,
++    EMA,
+     Focus,
+     GhostBottleneck,
+     GhostConv,
+@@ -1652,6 +1657,10 @@ def parse_model(d, ch, verbose=True):
+             args = [ch[f]]
+         elif m is Concat:
+             c2 = sum(ch[x] for x in f)
++        elif m in frozenset({CBAM, ChannelAttention, DySample, ECA, EMA}):
++            c1 = ch[f]
++            args = [c1, *args]
++            c2 = c1
+         elif m in frozenset(
+             {
+                 Detect,
+diff --git a/ultralytics/utils/loss.py b/ultralytics/utils/loss.py
+index 83274dbdf..08c413128 100644
+--- a/ultralytics/utils/loss.py
++++ b/ultralytics/utils/loss.py
+@@ -109,10 +109,12 @@ class DFLoss(nn.Module):
+ class BboxLoss(nn.Module):
+     """Criterion class for computing training losses for bounding boxes."""
+
+-    def __init__(self, reg_max: int = 16):
+-        """Initialize the BboxLoss module with regularization maximum and DFL settings."""
++    def __init__(self, reg_max: int = 16, bbox_loss: str = "ciou", focal_eiou_gamma: float = 2.0):
++        """Initialize the BboxLoss module with regression loss and DFL settings."""
+         super().__init__()
+         self.dfl_loss = DFLoss(reg_max) if reg_max > 1 else None
++        self.bbox_loss = bbox_loss
++        self.focal_eiou_gamma = focal_eiou_gamma
+
+     def forward(
+         self,
+@@ -128,8 +130,21 @@ class BboxLoss(nn.Module):
+     ) -> tuple[torch.Tensor, torch.Tensor]:
+         """Compute IoU and DFL losses for bounding boxes."""
+         weight = target_scores.sum(-1)[fg_mask].unsqueeze(-1)
+-        iou = bbox_iou(pred_bboxes[fg_mask], target_bboxes[fg_mask], xywh=False, CIoU=True)
+-        loss_iou = ((1.0 - iou) * weight).sum() / target_scores_sum
++        iou_kwargs = {"xywh": False}
++        if self.bbox_loss == "ciou":
++            iou_kwargs["CIoU"] = True
++        elif self.bbox_loss == "eiou":
++            iou_kwargs["EIoU"] = True
++        elif self.bbox_loss == "focal_eiou":
++            iou_kwargs.update(EIoU=True, Focal=True, gamma=self.focal_eiou_gamma)
++        else:
++            raise ValueError(f"unsupported bounding-box loss: {self.bbox_loss}")
++        iou_result = bbox_iou(pred_bboxes[fg_mask], target_bboxes[fg_mask], **iou_kwargs)
++        if isinstance(iou_result, tuple):
++            iou, focal_weight = iou_result
++            loss_iou = ((1.0 - iou) * focal_weight.detach() * weight).sum() / target_scores_sum
++        else:
++            loss_iou = ((1.0 - iou_result) * weight).sum() / target_scores_sum
+
+         # DFL loss
+         if self.dfl_loss:
+@@ -357,7 +372,11 @@ class v8DetectionLoss:
+             stride=self.stride.tolist(),
+             topk2=tal_topk2,
+         )
+-        self.bbox_loss = BboxLoss(m.reg_max).to(device)
++        self.bbox_loss = BboxLoss(
++            m.reg_max,
++            bbox_loss=getattr(h, "bbox_loss", "ciou"),
++            focal_eiou_gamma=getattr(h, "focal_eiou_gamma", 2.0),
++        ).to(device)
+         self.proj = torch.arange(m.reg_max, dtype=torch.float, device=device)
+
+     def preprocess(self, targets: torch.Tensor, batch_size: int, scale_tensor: torch.Tensor) -> torch.Tensor:
+diff --git a/ultralytics/utils/metrics.py b/ultralytics/utils/metrics.py
+index c3ce9804b..0e548ad6a 100644
+--- a/ultralytics/utils/metrics.py
++++ b/ultralytics/utils/metrics.py
+@@ -85,8 +85,11 @@ def bbox_iou(
+     GIoU: bool = False,
+     DIoU: bool = False,
+     CIoU: bool = False,
++    EIoU: bool = False,
++    Focal: bool = False,
++    gamma: float = 2.0,
+     eps: float = 1e-7,
+-) -> torch.Tensor:
++) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+     """Calculate the Intersection over Union (IoU) between bounding boxes.
+
+     This function supports various shapes for `box1` and `box2` as long as the last dimension is 4. For instance, you
+@@ -101,10 +104,13 @@ def bbox_iou(
+         GIoU (bool, optional): If True, calculate Generalized IoU.
+         DIoU (bool, optional): If True, calculate Distance IoU.
+         CIoU (bool, optional): If True, calculate Complete IoU.
++        EIoU (bool, optional): If True, calculate Efficient IoU.
++        Focal (bool, optional): If True with EIoU, return the IoU-based focal weight.
++        gamma (float, optional): Exponent used for focal EIoU weighting.
+         eps (float, optional): A small value to avoid division by zero.
+
+     Returns:
+-        (torch.Tensor): IoU, GIoU, DIoU, or CIoU values depending on the specified flags.
++        (torch.Tensor | tuple[torch.Tensor, torch.Tensor]): IoU variant, with a focal weight when requested.
+     """
+     # Get the coordinates of bounding boxes
+     if xywh:  # transform from xywh to xyxy
+@@ -128,14 +134,17 @@ def bbox_iou(
+
+     # IoU
+     iou = inter / union
+-    if CIoU or DIoU or GIoU:
++    if CIoU or DIoU or GIoU or EIoU:
+         cw = b1_x2.maximum(b2_x2) - b1_x1.minimum(b2_x1)  # convex (smallest enclosing box) width
+         ch = b1_y2.maximum(b2_y2) - b1_y1.minimum(b2_y1)  # convex height
+-        if CIoU or DIoU:  # Distance or Complete IoU https://arxiv.org/abs/1911.08287v1
++        if CIoU or DIoU or EIoU:  # Distance or Complete IoU https://arxiv.org/abs/1911.08287v1
+             c2 = cw.pow(2) + ch.pow(2) + eps  # convex diagonal squared
+             rho2 = (
+                 (b2_x1 + b2_x2 - b1_x1 - b1_x2).pow(2) + (b2_y1 + b2_y2 - b1_y1 - b1_y2).pow(2)
+             ) / 4  # center dist**2
++            if EIoU:
++                eiou = iou - (rho2 / c2 + (w2 - w1).pow(2) / (cw.pow(2) + eps) + (h2 - h1).pow(2) / (ch.pow(2) + eps))
++                return (eiou, iou.clamp(0, 1).pow(gamma)) if Focal else eiou
+             if CIoU:  # https://github.com/Zzh-tju/DIoU-SSD-pytorch/blob/master/utils/box/box_utils.py#L47
+                 v = (4 / math.pi**2) * ((w2 / h2).atan() - (w1 / h1).atan()).pow(2)
+                 with torch.no_grad():

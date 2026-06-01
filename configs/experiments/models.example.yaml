@@ -1,0 +1,22 @@
+models:
+  YOLOv11s:
+    weights: weights/yolo11s_density_baseline.pt
+    target_layer: 10
+  GhostConv:
+    weights: weights/yolo11s_ghost.pt
+    target_layer: 10
+  DySample:
+    weights: weights/yolo11s_dysample.pt
+    target_layer: 11
+  EMA:
+    weights: weights/yolo11s_ema.pt
+    target_layer: 11
+  CBAM:
+    weights: weights/yolo11s_cbam.pt
+    target_layer: 11
+  ECA:
+    weights: weights/yolo11s_eca.pt
+    target_layer: 11
+  Channel:
+    weights: weights/yolo11s_channel_attention.pt
+    target_layer: 11

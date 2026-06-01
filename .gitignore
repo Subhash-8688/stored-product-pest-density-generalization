@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# Local datasets, trained weights, and generated artifacts
+data/
+weights/
+outputs/*
+!outputs/.gitkeep
+runs/
+*.pt
+*.onnx
+
+# Local Ultralytics clone created by the setup script
+vendor/
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+.~lock.*#

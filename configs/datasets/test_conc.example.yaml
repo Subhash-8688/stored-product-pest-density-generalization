@@ -1,0 +1,9 @@
+path: data/test_conc
+train: images/test
+val: images/test
+test: images/test
+
+names:
+  0: TB
+  1: RZ
+  2: KP

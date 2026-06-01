@@ -1,0 +1,22 @@
+splits:
+  train:
+    images: data/density_development/images/train
+    labels: data/density_development/labels/train
+    label: train
+  val:
+    images: data/density_development/images/val
+    labels: data/density_development/labels/val
+    label: validation
+  test_free:
+    images: data/test_free/images/test
+    labels: data/test_free/labels/test
+    label: test free
+  test_conc:
+    images: data/test_conc/images/test
+    labels: data/test_conc/labels/test
+    label: test conc
+
+names:
+  0: TB
+  1: RZ
+  2: KP

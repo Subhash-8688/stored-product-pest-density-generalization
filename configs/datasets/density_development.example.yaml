@@ -1,0 +1,8 @@
+path: data/density_development
+train: images/train
+val: images/val
+
+names:
+  0: TB
+  1: RZ
+  2: KP
