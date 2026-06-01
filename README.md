@@ -48,6 +48,8 @@ export PYTHONPATH="$PWD/vendor/ultralytics:$PYTHONPATH"
 
 The setup script clones the pinned Ultralytics source into `vendor/ultralytics` and applies the chapter patch. The patch preserves baseline CIoU behavior. Focal-EIoU is enabled only when `--bbox-loss focal_eiou` is passed to training.
 
+`ffmpeg` with a `libx264` or `libopenh264` encoder is also required when regenerating the browser-compatible qualitative demo video.
+
 ## Dataset Layout
 
 Place local data under `data/` or pass explicit paths to the scripts. See [docs/dataset_layout.md](docs/dataset_layout.md). Dataset images and annotations are intentionally excluded from Git.
@@ -96,9 +98,9 @@ python scripts/plot_result_heatmaps.py
 
 ## Qualitative Demo
 
-[View the YOLOv11s + CBAM mixed-scene detection video](docs/assets/yolo11s_cbam_mixed_scene_demo.mp4).
+[Play or download the YOLOv11s + CBAM mixed-scene detection video](docs/assets/yolo11s_cbam_mixed_scene_demo.mp4?raw=1).
 
-[![YOLOv11s + CBAM mixed-scene detections](docs/assets/yolo11s_cbam_mixed_scene_poster.jpg)](docs/assets/yolo11s_cbam_mixed_scene_demo.mp4)
+[![YOLOv11s + CBAM mixed-scene detections](docs/assets/yolo11s_cbam_mixed_scene_poster.jpg)](docs/assets/yolo11s_cbam_mixed_scene_demo.mp4?raw=1)
 
 The demo uses the standalone CBAM attention variant reported in the attention study. The video is a qualitative illustration, not a substitute for the independent test-set metrics.
 
