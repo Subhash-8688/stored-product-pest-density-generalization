@@ -98,11 +98,11 @@ python scripts/plot_result_heatmaps.py
 
 ## Qualitative Demo
 
-[Play or download the YOLOv11s + CBAM mixed-scene detection video](docs/assets/yolo11s_cbam_mixed_scene_demo.mp4?raw=1).
+[View or download the YOLOv11s + CBAM mixed-scene detection video](docs/assets/yolo11s_cbam_mixed_scene_demo.mp4).
 
-[![YOLOv11s + CBAM mixed-scene detections](docs/assets/yolo11s_cbam_mixed_scene_poster.jpg)](docs/assets/yolo11s_cbam_mixed_scene_demo.mp4?raw=1)
+[![YOLOv11s + CBAM mixed-scene detections](docs/assets/yolo11s_cbam_mixed_scene_poster.jpg)](docs/assets/yolo11s_cbam_mixed_scene_demo.mp4)
 
-The demo uses the standalone CBAM attention variant reported in the attention study. The video is a qualitative illustration, not a substitute for the independent test-set metrics.
+The demo uses the standalone CBAM attention variant reported in the attention study. GitHub may download repository-hosted videos instead of previewing them inline. The video is a qualitative illustration, not a substitute for the independent test-set metrics.
 
 Regenerate a video with a local checkpoint:
 
