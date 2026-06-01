@@ -23,6 +23,8 @@ The target classes are:
 | `patches/ultralytics_chapter2.patch` | Clean Ultralytics integration for DySample, EMA, ECA, attention YAML parsing, and opt-in Focal-EIoU |
 | `configs/models/` | YOLOv11s architectural variants used by the ablation and attention studies |
 | `configs/datasets/` | Portable dataset YAML templates |
+| `docs/component_citations.md` | Original method attribution and manuscript citation guidance |
+| `docs/references.bib` | Ready-to-import BibTeX references for integrated components |
 | `scripts/train.py` | Reproducible training entry point |
 | `scripts/evaluate.py` | Evaluation metrics and timing in milliseconds per image and FPS |
 | `scripts/infer_video.py` | Annotated video inference for qualitative demonstrations |
@@ -128,3 +130,7 @@ python scripts/create_random_split.py \
 
 See [docs/reproducibility.md](docs/reproducibility.md) for the experiment matrix and metric definitions.
 The locally inspected environment is recorded in [docs/environment.md](docs/environment.md); confirm it matches the final experiment machine before manuscript submission.
+
+## Component Citations
+
+The repository integrates established methods rather than claiming them as new modules. Cite their original papers when describing Ghost Convolution, DySample, Focal-EIoU, EMA, CBAM, ECA, standalone Channel Attention, and the supporting visualization, audit, and augmentation methods. See [docs/component_citations.md](docs/component_citations.md) and import [docs/references.bib](docs/references.bib) into the manuscript bibliography.
