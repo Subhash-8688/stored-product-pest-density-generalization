@@ -38,7 +38,7 @@ data/test_conc/
 
 ## Leakage Audit Layout
 
-The leakage audit accepts the chapter-style comparison layout:
+The leakage audit accepts the following comparison layout:
 
 ```text
 data/leakage_audit/

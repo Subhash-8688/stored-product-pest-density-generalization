@@ -20,7 +20,7 @@ The target classes are:
 
 | Path | Purpose |
 | --- | --- |
-| `patches/ultralytics_chapter2.patch` | Clean Ultralytics integration for DySample, EMA, ECA, attention YAML parsing, and opt-in Focal-EIoU |
+| `patches/ultralytics.patch` | Clean Ultralytics integration for DySample, EMA, ECA, attention YAML parsing, and opt-in Focal-EIoU |
 | `configs/models/` | YOLOv11s architectural variants used by the ablation and attention studies |
 | `configs/datasets/` | Portable dataset YAML templates |
 | `docs/component_citations.md` | Original method attribution and manuscript citation guidance |
@@ -46,9 +46,17 @@ bash scripts/apply_ultralytics_patch.sh
 export PYTHONPATH="$PWD/vendor/ultralytics:$PYTHONPATH"
 ```
 
-The setup script clones the pinned Ultralytics source into `vendor/ultralytics` and applies the chapter patch. The patch preserves baseline CIoU behavior. Focal-EIoU is enabled only when `--bbox-loss focal_eiou` is passed to training.
+The setup script clones the pinned Ultralytics source into `vendor/ultralytics` and applies the integration patch. The patch preserves baseline CIoU behavior. Focal-EIoU is enabled only when `--bbox-loss focal_eiou` is passed to training.
 
 `ffmpeg` with a `libx264` or `libopenh264` encoder is also required when regenerating the browser-compatible qualitative demo video.
+
+## How It Works
+
+1. `scripts/apply_ultralytics_patch.sh` clones the pinned Ultralytics source into the ignored `vendor/ultralytics/` directory and applies `patches/ultralytics.patch`.
+2. The patch adds DySample, EMA, ECA, attention-module parsing, and opt-in EIoU or Focal-EIoU regression while preserving CIoU as the default baseline loss.
+3. The YAML files in `configs/models/` select the architectural variant. The `--bbox-loss` training argument selects the regression objective separately, allowing the same model YAML to be reused for CIoU and Focal-EIoU ablations.
+4. Dataset YAML files point to local YOLO-format images and labels. Datasets and trained weights are excluded from Git so that the repository remains a portable code companion rather than a data archive.
+5. `scripts/train.py` trains a selected variant, `scripts/evaluate.py` measures independent-domain performance, and the analysis scripts regenerate scene-density summaries, leakage audits, comparison plots, Grad-CAM panels, and qualitative detections.
 
 ## Dataset Layout
 
@@ -125,7 +133,7 @@ python scripts/create_random_split.py \
 ## Reproducibility Notes
 
 - Images are resized to `640 x 640`.
-- Training defaults reproduce the chapter configuration: 300 epochs, batch size 16, AdamW, cosine learning-rate decay, and mosaic disabled during the final 10 epochs.
+- Training defaults reproduce the study configuration: 300 epochs, batch size 16, AdamW, cosine learning-rate decay, and mosaic disabled during the final 10 epochs.
 - Augmentation is applied to training images only. Validation and test images are not augmented.
 - The reported FPS values are throughput estimates derived from Ultralytics milliseconds-per-image timings. Use repeated runs on the same hardware for comparative latency claims.
 - The repository uses AGPL-3.0 because it distributes a patch against Ultralytics AGPL-3.0 source.

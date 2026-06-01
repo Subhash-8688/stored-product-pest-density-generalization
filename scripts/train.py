@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Train a YOLOv11s chapter experiment with reproducible defaults."""
+"""Train a YOLOv11s study experiment with reproducible defaults."""
 
 from __future__ import annotations
 

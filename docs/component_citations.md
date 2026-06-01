@@ -57,4 +57,4 @@ For the separate attention study:
 
 ## Implementation Note
 
-The repository does not redistribute the original external repositories. It provides an Ultralytics patch containing the chapter-specific integration. The attribution above distinguishes the original method contributions from this study's integration, placement choices, density-stratified evaluation protocol, and pest-detection experiments.
+The repository does not redistribute the original external repositories. It provides an Ultralytics patch containing the study-specific integration. The attribution above distinguishes the original method contributions from this study's integration, placement choices, density-stratified evaluation protocol, and pest-detection experiments.

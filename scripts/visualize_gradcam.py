@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate Grad-CAM panels for chapter model variants."""
+"""Generate Grad-CAM panels for study model variants."""
 
 from __future__ import annotations
 

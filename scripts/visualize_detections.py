@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate qualitative detection panels for chapter model variants."""
+"""Generate qualitative detection panels for study model variants."""
 
 from __future__ import annotations
 

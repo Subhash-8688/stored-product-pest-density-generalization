@@ -1,3 +1,6 @@
+#!/usr/bin/env python3
+"""Audit visual and annotation similarity across detection dataset splits."""
+
 from pathlib import Path
 import argparse
 import hashlib
@@ -7,7 +10,7 @@ import math
 import os
 import re
 from collections import Counter, defaultdict
-from datetime import datetime
+from datetime import date, datetime
 
 os.environ.setdefault("MPLCONFIGDIR", "/tmp/matplotlib")
 
@@ -23,10 +26,10 @@ from skimage.metrics import structural_similarity as ssim
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-CHAPTER_ROOT = PROJECT_ROOT / "data"
+DATA_ROOT = PROJECT_ROOT / "data"
 DATASETS = {
-    "Detect": CHAPTER_ROOT / "Detect",
-    "Detect-conc": CHAPTER_ROOT / "Detect-conc",
+    "Detect": DATA_ROOT / "Detect",
+    "Detect-conc": DATA_ROOT / "Detect-conc",
 }
 OUT = PROJECT_ROOT / "outputs" / "leakage_analysis_detect_vs_detect_conc"
 
@@ -39,7 +42,7 @@ SPLIT_COLORS = {"train": "#2f6db3", "val": "#e58b25", "test": "#2f9d58"}
 CLASS_COLORS = {0: "#1f77b4", 1: "#ff7f0e", 2: "#2ca02c"}
 
 PAIR_COLUMNS = [
-    "dataset", "score", "split_pair", "a_path", "b_path", "a_chapter_relpath", "b_chapter_relpath",
+    "dataset", "score", "split_pair", "a_path", "b_path", "a_data_relpath", "b_data_relpath",
     "a_prefix", "b_prefix", "a_dominant_class", "b_dominant_class", "a_class_signature", "b_class_signature",
     "phash_dist", "dhash_dist", "ahash_dist", "ssim_192", "mean_label_iou", "matched_iou50", "matched_iou75",
     "class_counts_same", "box_count_a", "box_count_b", "box_count_delta", "time_delta_s",
@@ -199,7 +202,7 @@ def index_dataset(name, root):
                 "split": split,
                 "path": path,
                 "relpath": str(path.relative_to(root)),
-                "chapter_relpath": str(path.relative_to(CHAPTER_ROOT)),
+                "data_relpath": str(path.relative_to(DATA_ROOT)),
                 "label_relpath": str(label_path.relative_to(root)),
                 "stem": stem,
                 "prefix": prefix,
@@ -270,8 +273,8 @@ def compute_pairs(records, dataset_name):
                         "split_pair": f"{a_split}-{b_split}",
                         "a_path": a["relpath"],
                         "b_path": b["relpath"],
-                        "a_chapter_relpath": a["chapter_relpath"],
-                        "b_chapter_relpath": b["chapter_relpath"],
+                        "a_data_relpath": a["data_relpath"],
+                        "b_data_relpath": b["data_relpath"],
                         "a_prefix": a["prefix"],
                         "b_prefix": b["prefix"],
                         "a_dominant_class": a["dominant_class"],
@@ -438,7 +441,7 @@ def make_plots(combined_pairs, summaries, shared):
     very = combined_pairs[combined_pairs["very_strong"].fillna(False).astype(bool)].copy()
 
     fig, axes = plt.subplots(2, 2, figsize=(15, 10))
-    fig.suptitle("Chapter 2 Detect vs Detect-conc Leakage Overview", fontsize=18, fontweight="bold")
+    fig.suptitle("Detect vs Detect-conc Leakage Overview", fontsize=18, fontweight="bold")
     summary_df = pd.DataFrame(summaries)
     ax = axes[0, 0]
     count_rows = []
@@ -483,7 +486,7 @@ def make_plots(combined_pairs, summaries, shared):
     sns.barplot(shared_plot, x="split", y="images", hue="set", ax=ax)
     ax.set_title("Detect vs Detect-conc Shared Images By Hash")
     ax.legend(fontsize=8)
-    savefig(OUT / "01_chapter2_leakage_overview.png")
+    savefig(OUT / "01_leakage_overview.png")
 
     if not high.empty:
         plt.figure(figsize=(10, 7))
@@ -636,7 +639,7 @@ def link(path, label=None):
 
 def write_html_report(summary):
     figures = [
-        ("01_chapter2_leakage_overview.png", "Overview dashboard"),
+        ("01_leakage_overview.png", "Overview dashboard"),
         ("02_high_visual_similarity_vs_iou.png", "High-visual SSIM vs annotation IoU"),
         ("02_closest_similarity_vs_annotation_overlap.png", "Closest pairs: visual similarity vs annotation overlap"),
         ("03_detect_high_visual_heatmap.png", "Detect high-visual heatmap"),
@@ -654,7 +657,7 @@ def write_html_report(summary):
         for s in summary["datasets"]
     )
     doc = f"""<!doctype html>
-<html><head><meta charset="utf-8"><title>Chapter 2 Leakage Visual Report</title>
+<html><head><meta charset="utf-8"><title>Leakage Visual Report</title>
 <style>
 body {{ font-family: Arial, sans-serif; margin: 32px; background: #fafafa; color: #222; }}
 .summary {{ display: grid; grid-template-columns: repeat(4, minmax(160px, 1fr)); gap: 12px; margin: 24px 0; }}
@@ -664,7 +667,7 @@ section {{ margin: 18px 0; }}
 img {{ width: 100%; height: auto; border: 1px solid #ddd; }}
 code {{ background: #eee; padding: 2px 4px; border-radius: 3px; }}
 </style></head><body>
-<h1>Chapter 2 Detect / Detect-conc Leakage Visual Report</h1>
+<h1>Detect / Detect-conc Leakage Visual Report</h1>
 <p>Train and validation splits are compared by hash across both folders; test differs by design.</p>
 <div class="summary">{cards}</div>
 {''.join(sections)}
@@ -727,6 +730,13 @@ def write_markdown_report(summary, combined_high, combined_nearest, shared_df):
             item = row._asdict()
             nearest_rows.append([item.get(c, "") for c in nearest_cols])
 
+    train_val_shared = shared_df.loc[shared_df["split"].isin(["train", "val"]), "same_set_by_hash"].all()
+    shared_statement = (
+        "The train and validation sets are confirmed to be the same across the two folders by image hash, while the test sets differ."
+        if train_val_shared
+        else "The split-level hash comparison is reported below; inspect it before assuming that the two folders share identical train and validation sets."
+    )
+
     if combined_high.empty:
         high_visual_note = "No pairs met the strict high-visual-similarity threshold in either dataset. I still wrote closest-neighbor evidence so this absence can be inspected visually."
         if not combined_nearest.empty:
@@ -743,27 +753,37 @@ def write_markdown_report(summary, combined_high, combined_nearest, shared_df):
         high_visual_note = "The table below lists the strongest pairs that met the strict high-visual-similarity threshold."
         key_result = (
             "The key result is that both datasets contain high-visual-similarity cross-split pairs, meaning visually near-duplicate frames appear across train/val/test boundaries. "
-            "Because train and val are shared between the folders, the `train-val` leakage evidence is duplicated across `Detect` and `Detect-conc`; "
-            "the meaningful difference between the two reports is in pairs involving `test`."
+            "Inspect the split-level hash comparison and annotated pairs before interpreting performance from a randomly partitioned dataset."
+        )
+
+    if combined_high.empty:
+        interpretation = (
+            "No cross-split pair met the configured strict high-visual-similarity threshold. Review the closest-neighbor evidence and timestamp-adjacency tables before drawing conclusions about leakage. "
+            "If capture-session metadata is available, a session-level split remains the cleanest way to reduce leakage risk from sequential image capture."
+        )
+    else:
+        interpretation = (
+            "At least one cross-split pair met the configured strict high-visual-similarity threshold. These visually similar frames can make random-split validation metrics optimistic when related captures appear across dataset boundaries. "
+            "Use the annotated pair sheets, split-pair counts, and timestamp-adjacency tables to identify whether a session-level partition is needed."
         )
 
     if combined_high.empty:
         visual_evidence = """- `visual_report.html`: browsable visual report.
-- `01_chapter2_leakage_overview.png`: overview of split sizes, leakage counts, and shared split hashes.
+- `01_leakage_overview.png`: overview of split sizes, leakage counts, and shared split hashes.
 - `02_closest_similarity_vs_annotation_overlap.png`: visual similarity vs annotation overlap for the closest cross-split neighbors.
 - `05_closest_cross_split_pairs_annotated.jpg`: closest visual-neighbor fallback with YOLO boxes overlaid."""
     else:
         visual_evidence = """- `visual_report.html`: browsable visual report.
-- `01_chapter2_leakage_overview.png`: overview of split sizes, leakage counts, and shared split hashes.
+- `01_leakage_overview.png`: overview of split sizes, leakage counts, and shared split hashes.
 - `02_high_visual_similarity_vs_iou.png`: high-visual pairs plotted by visual similarity and annotation overlap.
 - `03_detect_high_visual_heatmap.png`: Detect high-visual pairs by class and split pair.
 - `03_detect_conc_high_visual_heatmap.png`: Detect-conc high-visual pairs by class and split pair.
 - `04_high_visual_metric_distributions.png`: SSIM, pHash, and annotation IoU distributions.
 - `05_top_high_visual_pairs_annotated.jpg`: top high-visual pairs with YOLO boxes overlaid."""
 
-    report = f"""# Chapter 2 Detect / Detect-conc Data Leakage Analysis
+    report = f"""# Detect / Detect-conc Data Leakage Analysis
 
-Generated: 2026-05-18
+Generated: {date.today().isoformat()}
 Datasets:
 
 - `Detect`: `{DATASETS['Detect']}`
@@ -771,7 +791,7 @@ Datasets:
 
 ## Executive Summary
 
-I ran the same cross-split leakage audit on both `Detect` and `Detect-conc`, with special attention to high-visual-similarity cross-split pairs. The train and validation sets are confirmed to be the same across the two folders by image hash, while the test sets differ.
+I ran the same cross-split leakage audit on both `Detect` and `Detect-conc`, with special attention to high-visual-similarity cross-split pairs. {shared_statement}
 
 {key_result}
 
@@ -816,23 +836,21 @@ Closest cross-split visual neighbors by hash distance:
 
 ## Interpretation
 
-Under the same strict thresholds used for the previous audit, I did **not** find high-visual-similarity cross-split leakage in `Detect` or `Detect-conc`. The shared train/val split is confirmed, so both folders inherit the same train-val structure, but the test sets are different and neither test set produced high-visual train-test or val-test pairs.
-
-There is one timestamp-adjacent train-val pair within 10 seconds in each folder, because train and val are shared. That is a weaker sequence-adjacency signal, not a high-visual duplicate finding. If capture-session metadata is available, a session-level split is still the cleanest way to avoid future leakage.
+{interpretation}
 """
-    (OUT / "chapter2_leakage_analysis_report.md").write_text(report, encoding="utf-8")
+    (OUT / "leakage_analysis_report.md").write_text(report, encoding="utf-8")
 
 
 def main():
-    global CHAPTER_ROOT, DATASETS, OUT
+    global DATA_ROOT, DATASETS, OUT
     parser = argparse.ArgumentParser(description="Audit cross-split similarity in sequentially captured detection data.")
-    parser.add_argument("--data-root", type=Path, default=CHAPTER_ROOT, help="Directory containing Detect and Detect-conc.")
+    parser.add_argument("--data-root", type=Path, default=DATA_ROOT, help="Directory containing Detect and Detect-conc.")
     parser.add_argument("--output-dir", type=Path, default=OUT)
     args = parser.parse_args()
-    CHAPTER_ROOT = args.data_root.resolve()
+    DATA_ROOT = args.data_root.resolve()
     DATASETS = {
-        "Detect": CHAPTER_ROOT / "Detect",
-        "Detect-conc": CHAPTER_ROOT / "Detect-conc",
+        "Detect": DATA_ROOT / "Detect",
+        "Detect-conc": DATA_ROOT / "Detect-conc",
     }
     OUT = args.output_dir.resolve()
     OUT.mkdir(parents=True, exist_ok=True)

@@ -21,6 +21,7 @@ import matplotlib.pyplot as plt
 
 IMG_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}
 COLORS = ["#0072B2", "#D55E00", "#009E73", "#CC79A7", "#E69F00", "#56B4E9"]
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def parse_args() -> argparse.Namespace:
@@ -149,7 +150,7 @@ def main() -> None:
     args = parse_args()
     config = yaml.safe_load(args.dataset.read_text())
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    root = args.root.resolve() if args.root else args.dataset.resolve().parents[2]
+    root = args.root.resolve() if args.root else PROJECT_ROOT
     images, instances = build_tables(config, root)
     images.to_csv(args.output_dir / "image_level_summary.csv", index=False)
     instances.to_csv(args.output_dir / "instance_level_summary.csv", index=False)
