@@ -45,6 +45,7 @@ For the separate attention study:
 - DySample paper: [ICCV 2023 open-access page](https://openaccess.thecvf.com/content/ICCV2023/html/Liu_Learning_to_Upsample_by_Learning_to_Sample_ICCV_2023_paper.html)
 - DySample reference implementation: [tiny-smart/dysample](https://github.com/tiny-smart/dysample)
 - Focal-EIoU paper: [Neurocomputing article](https://doi.org/10.1016/j.neucom.2022.07.042)
+- Focal-EIoU implementation note: the included Ultralytics patch implements the published Zhang et al. (2022) formulation. No verified official implementation repository from the paper authors was identified. If code is adapted from a third-party repository, cite that source separately.
 - EMA paper: [IEEE Xplore](https://doi.org/10.1109/ICASSP49357.2023.10096516)
 - CBAM paper: [ECCV 2018 open-access page](https://openaccess.thecvf.com/content_ECCV_2018/html/Sanghyun_Woo_Convolutional_Block_Attention_ECCV_2018_paper.html)
 - ECA-Net paper: [CVPR 2020 open-access page](https://openaccess.thecvf.com/content_CVPR_2020/html/Wang_ECA-Net_Efficient_Channel_Attention_for_Deep_Convolutional_Neural_Networks_CVPR_2020_paper.html)
