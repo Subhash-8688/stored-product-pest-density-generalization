@@ -23,8 +23,10 @@ The target classes are:
 | `patches/ultralytics.patch` | Clean Ultralytics integration for DySample, EMA, ECA, attention YAML parsing, and opt-in Focal-EIoU |
 | `configs/models/` | YOLOv11s architectural variants used by the ablation and attention studies |
 | `configs/datasets/` | Portable dataset YAML templates |
+| `docs/integration_notes.md` | File-level explanation of the Ultralytics patch and model-selection flow |
 | `docs/component_citations.md` | Original method attribution and manuscript citation guidance |
 | `docs/references.bib` | Ready-to-import BibTeX references for integrated components |
+| `CITATION.cff` | GitHub-compatible repository citation metadata |
 | `scripts/train.py` | Reproducible training entry point |
 | `scripts/evaluate.py` | Evaluation metrics and timing in milliseconds per image and FPS |
 | `scripts/infer_video.py` | Annotated video inference for qualitative demonstrations |
@@ -144,3 +146,9 @@ The locally inspected environment is recorded in [docs/environment.md](docs/envi
 ## Component Citations
 
 The repository integrates established methods rather than claiming them as new modules. Cite their original papers when describing Ghost Convolution, DySample, Focal-EIoU, EMA, CBAM, ECA, standalone Channel Attention, and the supporting visualization, audit, and augmentation methods. See [docs/component_citations.md](docs/component_citations.md) and import [docs/references.bib](docs/references.bib) into the manuscript bibliography.
+
+## License and Attribution
+
+This project integrates code from [Ultralytics YOLO](https://github.com/ultralytics/ultralytics), which is licensed under [AGPL-3.0](https://github.com/ultralytics/ultralytics/blob/main/LICENSE). This repository distributes the corresponding integration patch and is also released under AGPL-3.0. See [docs/integration_notes.md](docs/integration_notes.md) for the patch scope and [LICENSE](LICENSE) for the full license text.
+
+The repository includes `CITATION.cff` so GitHub can expose the repository citation panel.

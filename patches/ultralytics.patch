@@ -38,7 +38,7 @@ index d0e1340e1..15067910a 100644
      "OBB",
      "OBB26",
 diff --git a/ultralytics/nn/modules/block.py b/ultralytics/nn/modules/block.py
-index d6f66644b..d0f41d258 100644
+index d6f66644b..e8ff4a2f4 100644
 --- a/ultralytics/nn/modules/block.py
 +++ b/ultralytics/nn/modules/block.py
 @@ -21,6 +21,8 @@ __all__ = (
@@ -58,10 +58,10 @@ index d6f66644b..d0f41d258 100644
      "GhostBottleneck",
      "HGBlock",
      "HGStem",
-@@ -55,6 +58,154 @@ __all__ = (
+@@ -55,6 +58,158 @@ __all__ = (
  )
-
-
+ 
+ 
 +class EMA(nn.Module):
 +    """Efficient multi-scale attention for feature recalibration."""
 +
@@ -85,9 +85,11 @@ index d6f66644b..d0f41d258 100644
 +        batch, channels, height, width = x.shape
 +        groups = self.groups
 +        channels_per_group = channels // groups
++        # Process each group independently to keep cross-spatial attention lightweight.
 +        group_x = x.reshape(batch * groups, channels_per_group, height, width)
 +        x_h = self.pool_h(group_x)
 +        x_w = self.pool_w(group_x).permute(0, 1, 3, 2)
++        # Learn directional gates before constructing the final spatial response map.
 +        hw = self.conv1x1(torch.cat([x_h, x_w], dim=2))
 +        x_h, x_w = torch.split(hw, [height, width], dim=2)
 +        x1 = self.gn(group_x * x_h.sigmoid() * x_w.permute(0, 1, 3, 2).sigmoid())
@@ -112,6 +114,7 @@ index d6f66644b..d0f41d258 100644
 +
 +    def forward(self, x: torch.Tensor) -> torch.Tensor:
 +        """Apply efficient channel attention."""
++        # The 1D convolution captures local cross-channel interactions from pooled descriptors.
 +        y = self.avg_pool(x).squeeze(-1).transpose(-1, -2)
 +        y = self.conv(y).transpose(-1, -2).unsqueeze(-1)
 +        return x * self.sigmoid(y)
@@ -170,6 +173,7 @@ index d6f66644b..d0f41d258 100644
 +        coords_w = torch.arange(width, device=x.device, dtype=x.dtype) + 0.5
 +        coords = torch.stack(torch.meshgrid(coords_w, coords_h, indexing="ij")).transpose(1, 2).unsqueeze(1).unsqueeze(0)
 +        normalizer = torch.tensor([width, height], dtype=x.dtype, device=x.device).view(1, 2, 1, 1, 1)
++        # grid_sample expects normalized coordinates; pixel shuffle expands them to the target resolution.
 +        coords = 2 * (coords + offset) / normalizer - 1
 +        coords = (
 +            F.pixel_shuffle(coords.view(batch, -1, height, width), self.scale)
@@ -212,7 +216,7 @@ index d6f66644b..d0f41d258 100644
 +
  class DFL(nn.Module):
      """Integral module of Distribution Focal Loss (DFL).
-
+ 
 diff --git a/ultralytics/nn/tasks.py b/ultralytics/nn/tasks.py
 index 011410ee3..f1c88571d 100644
 --- a/ultralytics/nn/tasks.py
@@ -251,13 +255,13 @@ index 011410ee3..f1c88571d 100644
              {
                  Detect,
 diff --git a/ultralytics/utils/loss.py b/ultralytics/utils/loss.py
-index 83274dbdf..08c413128 100644
+index 83274dbdf..d0ae0a541 100644
 --- a/ultralytics/utils/loss.py
 +++ b/ultralytics/utils/loss.py
 @@ -109,10 +109,12 @@ class DFLoss(nn.Module):
  class BboxLoss(nn.Module):
      """Criterion class for computing training losses for bounding boxes."""
-
+ 
 -    def __init__(self, reg_max: int = 16):
 -        """Initialize the BboxLoss module with regularization maximum and DFL settings."""
 +    def __init__(self, reg_max: int = 16, bbox_loss: str = "ciou", focal_eiou_gamma: float = 2.0):
@@ -266,10 +270,10 @@ index 83274dbdf..08c413128 100644
          self.dfl_loss = DFLoss(reg_max) if reg_max > 1 else None
 +        self.bbox_loss = bbox_loss
 +        self.focal_eiou_gamma = focal_eiou_gamma
-
+ 
      def forward(
          self,
-@@ -128,8 +130,21 @@ class BboxLoss(nn.Module):
+@@ -128,8 +130,22 @@ class BboxLoss(nn.Module):
      ) -> tuple[torch.Tensor, torch.Tensor]:
          """Compute IoU and DFL losses for bounding boxes."""
          weight = target_scores.sum(-1)[fg_mask].unsqueeze(-1)
@@ -287,13 +291,14 @@ index 83274dbdf..08c413128 100644
 +        iou_result = bbox_iou(pred_bboxes[fg_mask], target_bboxes[fg_mask], **iou_kwargs)
 +        if isinstance(iou_result, tuple):
 +            iou, focal_weight = iou_result
++            # Prioritize effective examples with the detached IoU^gamma overlap-quality weight.
 +            loss_iou = ((1.0 - iou) * focal_weight.detach() * weight).sum() / target_scores_sum
 +        else:
 +            loss_iou = ((1.0 - iou_result) * weight).sum() / target_scores_sum
-
+ 
          # DFL loss
          if self.dfl_loss:
-@@ -357,7 +372,11 @@ class v8DetectionLoss:
+@@ -357,7 +373,11 @@ class v8DetectionLoss:
              stride=self.stride.tolist(),
              topk2=tal_topk2,
          )
@@ -304,10 +309,10 @@ index 83274dbdf..08c413128 100644
 +            focal_eiou_gamma=getattr(h, "focal_eiou_gamma", 2.0),
 +        ).to(device)
          self.proj = torch.arange(m.reg_max, dtype=torch.float, device=device)
-
+ 
      def preprocess(self, targets: torch.Tensor, batch_size: int, scale_tensor: torch.Tensor) -> torch.Tensor:
 diff --git a/ultralytics/utils/metrics.py b/ultralytics/utils/metrics.py
-index c3ce9804b..0e548ad6a 100644
+index c3ce9804b..f82bcf8a1 100644
 --- a/ultralytics/utils/metrics.py
 +++ b/ultralytics/utils/metrics.py
 @@ -85,8 +85,11 @@ def bbox_iou(
@@ -321,7 +326,7 @@ index c3ce9804b..0e548ad6a 100644
 -) -> torch.Tensor:
 +) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
      """Calculate the Intersection over Union (IoU) between bounding boxes.
-
+ 
      This function supports various shapes for `box1` and `box2` as long as the last dimension is 4. For instance, you
 @@ -101,10 +104,13 @@ def bbox_iou(
          GIoU (bool, optional): If True, calculate Generalized IoU.
@@ -331,15 +336,15 @@ index c3ce9804b..0e548ad6a 100644
 +        Focal (bool, optional): If True with EIoU, return the IoU-based focal weight.
 +        gamma (float, optional): Exponent used for focal EIoU weighting.
          eps (float, optional): A small value to avoid division by zero.
-
+ 
      Returns:
 -        (torch.Tensor): IoU, GIoU, DIoU, or CIoU values depending on the specified flags.
 +        (torch.Tensor | tuple[torch.Tensor, torch.Tensor]): IoU variant, with a focal weight when requested.
      """
      # Get the coordinates of bounding boxes
      if xywh:  # transform from xywh to xyxy
-@@ -128,14 +134,17 @@ def bbox_iou(
-
+@@ -128,14 +134,18 @@ def bbox_iou(
+ 
      # IoU
      iou = inter / union
 -    if CIoU or DIoU or GIoU:
@@ -353,6 +358,7 @@ index c3ce9804b..0e548ad6a 100644
                  (b2_x1 + b2_x2 - b1_x1 - b1_x2).pow(2) + (b2_y1 + b2_y2 - b1_y1 - b1_y2).pow(2)
              ) / 4  # center dist**2
 +            if EIoU:
++                # Penalize center, width, and height mismatch directly; optionally return the focal overlap weight.
 +                eiou = iou - (rho2 / c2 + (w2 - w1).pow(2) / (cw.pow(2) + eps) + (h2 - h1).pow(2) / (ch.pow(2) + eps))
 +                return (eiou, iou.clamp(0, 1).pow(gamma)) if Focal else eiou
              if CIoU:  # https://github.com/Zzh-tju/DIoU-SSD-pytorch/blob/master/utils/box/box_utils.py#L47
